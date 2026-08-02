@@ -652,6 +652,22 @@ async function startServer() {
     });
   });
 
+  // Reset routes
+  app.post('/api/reset/bills', (req, res) => {
+    const billCount = db.prepare('SELECT COUNT(*) as c FROM bills').get();
+    const readingCount = db.prepare('SELECT COUNT(*) as c FROM meter_readings').get();
+    db.exec('DELETE FROM bills');
+    db.exec('DELETE FROM meter_readings');
+    res.json({ success: true, deleted_bills: billCount.c, deleted_readings: readingCount.c });
+  });
+
+  app.post('/api/reset/all', (req, res) => {
+    db.exec('DELETE FROM bills');
+    db.exec('DELETE FROM meter_readings');
+    db.exec('DELETE FROM tenants');
+    res.json({ success: true });
+  });
+
   // Serve frontend
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));

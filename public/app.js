@@ -1216,6 +1216,19 @@ async function renderSettings() {
         </table>
       </div>
     </div>
+
+    <div class="card" style="border: 2px solid var(--danger); margin-top: 20px;">
+      <div class="card-header">
+        <h3 style="color:var(--danger);">⚠️ Danger Zone</h3>
+      </div>
+      <p style="color:var(--text-light);margin-bottom:15px;font-size:0.9rem;">
+        These actions cannot be undone. Use with caution.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-danger" onclick="resetBillsOnly()">🗑️ Reset All Bills & Readings</button>
+        <button class="btn btn-danger" onclick="resetEverything()">💣 Reset Everything</button>
+      </div>
+    </div>
   `;
 
   document.getElementById('pageContent').innerHTML = html;
@@ -1299,6 +1312,27 @@ async function updateType(id) {
   showToast('Rate updated!', 'success');
   hideModal();
   renderSettings();
+}
+
+// Reset functions
+async function resetBillsOnly() {
+  if (confirm('⚠️ This will DELETE all bills and meter readings.\n\nTenants, properties, and rates will remain.\n\nAre you sure?')) {
+    if (confirm('FINAL CONFIRMATION: Delete ALL bills and readings?')) {
+      const result = await API.post('/reset/bills', {});
+      showToast(`Reset complete! ${result.deleted_bills} bills and ${result.deleted_readings} readings deleted.`, 'success');
+      renderSettings();
+    }
+  }
+}
+
+async function resetEverything() {
+  if (confirm('💣 This will DELETE EVERYTHING:\n- All bills\n- All meter readings\n- All tenants\n\nProperties and rates will remain.\n\nAre you sure?')) {
+    if (confirm('FINAL CONFIRMATION: Delete ALL data?')) {
+      const result = await API.post('/reset/all', {});
+      showToast('All data has been reset!', 'success');
+      renderSettings();
+    }
+  }
 }
 
 // Initial load

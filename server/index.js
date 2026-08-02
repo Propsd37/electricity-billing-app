@@ -327,6 +327,34 @@ async function startServer() {
     res.json(reading || { current_reading: 0 });
   });
 
+  // Save only the previous reading (initial/starting reading)
+  app.post('/api/meter-readings/save-previous', (req, res) => {
+    const { tenant_id, property_id, previous_reading } = req.body;
+    try {
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const now = new Date();
+      const month = months[now.getMonth()];
+      const year = now.getFullYear();
+
+      // Check if a reading already exists for this tenant/month
+      const existing = db.prepare('SELECT id FROM meter_readings WHERE tenant_id = ? AND month = ? AND year = ?').get(parseInt(tenant_id), month, year);
+      if (existing) {
+        // Update existing
+        db.prepare('UPDATE meter_readings SET previous_reading = ?, current_reading = ?, units_consumed = 0 WHERE id = ?')
+          .run(previous_reading, previous_reading, existing.id);
+      } else {
+        // Create new with current = previous (0 units consumed)
+        db.prepare(`
+          INSERT INTO meter_readings (tenant_id, property_id, reading_date, month, year, previous_reading, current_reading, units_consumed)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+        `).run(parseInt(tenant_id), parseInt(property_id), now.toISOString().split('T')[0], month, year, previous_reading, previous_reading);
+      }
+      res.json({ success: true, previous_reading });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.post('/api/meter-readings', (req, res) => {
     const { tenant_id, property_id, reading_date, month, year, previous_reading, current_reading, existing_bill_id } = req.body;
     try {

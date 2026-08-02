@@ -299,7 +299,10 @@ function openCardDetail(p) {
               </div>
             </div>
             <div class="prop-calc-row" id="preview-${p.property_id}"></div>
-            <button class="btn btn-primary" onclick="submitReadingFromCard(${p.property_id}, ${p.tenant_id}, ${p.rate_per_unit}, ${p.bill_id || 0})">💾 Save Reading & Update Bill</button>
+            <div class="prop-btn-row">
+              <button class="btn btn-sm btn-outline" onclick="savePrevReading(${p.property_id}, ${p.tenant_id})">💾 Save Previous Only</button>
+              <button class="btn btn-primary" onclick="submitReadingFromCard(${p.property_id}, ${p.tenant_id}, ${p.rate_per_unit}, ${p.bill_id || 0})">💾 Generate Bill</button>
+            </div>
           </div>
         `}
       </div>
@@ -369,6 +372,23 @@ function previewBill(propertyId, rate, rent) {
   } else {
     el.style.display = 'none';
   }
+}
+
+async function savePrevReading(propertyId, tenantId) {
+  const prev = parseFloat(document.getElementById(`prev-${propertyId}`).value);
+  if (prev === null || isNaN(prev)) {
+    showToast('Enter the previous reading', 'error');
+    return;
+  }
+  const result = await API.post('/meter-readings/save-previous', {
+    tenant_id: tenantId,
+    property_id: propertyId,
+    previous_reading: prev
+  });
+  if (result.error) { showToast(result.error, 'error'); return; }
+  showToast('Previous reading saved!', 'success');
+  hideModal();
+  renderDashboard();
 }
 
 async function submitReadingFromCard(propertyId, tenantId, rate, existingBillId) {

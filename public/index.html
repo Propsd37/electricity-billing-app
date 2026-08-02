@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>🏠 Rent & Electricity Billing</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="/manifest.json">
+</head>
+<body>
+  <div id="app">
+    <nav class="sidebar" id="sidebar">
+      <div class="logo">
+        <h2>🏠 Billing App</h2>
+      </div>
+      <ul class="nav-links">
+        <li><a href="#" class="nav-link active" data-page="dashboard">📊 Dashboard</a></li>
+        <li><a href="#" class="nav-link" data-page="readings">⚡ Meter Readings</a></li>
+        <li><a href="#" class="nav-link" data-page="bills">📄 Bills</a></li>
+        <li><a href="#" class="nav-link" data-page="tenants">👥 Tenants</a></li>
+        <li><a href="#" class="nav-link" data-page="properties">🏘️ Properties</a></li>
+        <li><a href="#" class="nav-link" data-page="settings">⚙️ Settings</a></li>
+      </ul>
+    </nav>
+
+    <main class="content">
+      <header class="top-bar">
+        <button class="menu-btn" id="menuBtn">☰</button>
+        <h1 id="pageTitle">Dashboard</h1>
+      </header>
+      <div id="pageContent" class="page-content">
+        <!-- Dynamic content loads here -->
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="modal" class="modal hidden">
+    <div class="modal-content" id="modalContent"></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+</html>

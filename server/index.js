@@ -657,7 +657,7 @@ async function startServer() {
     res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
   });
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n  Electricity Billing App running at http://localhost:${PORT}`);
     console.log(`  Dashboard: http://localhost:${PORT}`);
     console.log(`\n  Press Ctrl+C to stop.\n`);

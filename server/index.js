@@ -609,7 +609,9 @@ async function startServer() {
         COALESCE(SUM(CASE WHEN is_paid = 0 THEN 1 ELSE 0 END), 0) as unpaid_count,
         COALESCE(SUM(rent_amount), 0) as total_rent,
         COALESCE(SUM(electricity_amount), 0) as total_electricity
-      FROM bills WHERE month = ? AND year = ?
+      FROM bills b
+      JOIN tenants t ON b.tenant_id = t.id AND t.is_active = 1
+      WHERE b.month = ? AND b.year = ?
     `).get(m, y);
 
     const pendingBills = db.prepare(`

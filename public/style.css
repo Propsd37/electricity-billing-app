@@ -611,6 +611,7 @@ tr:hover {
 
 .gh-stat.gh-success { color: var(--success); }
 .gh-stat.gh-pending { color: var(--danger); }
+.gh-stat.gh-elec { color: var(--warning); }
 
 .group-body {
   padding: 8px;

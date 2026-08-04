@@ -77,10 +77,16 @@ async function startServer() {
     electricity_amount REAL DEFAULT 0,
     total_amount REAL DEFAULT 0,
     is_paid INTEGER DEFAULT 0,
+    rent_paid INTEGER DEFAULT 0,
+    electricity_paid INTEGER DEFAULT 0,
     paid_date DATE,
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // Add columns if they don't exist (for existing databases)
+  try { db.exec('ALTER TABLE bills ADD COLUMN rent_paid INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.exec('ALTER TABLE bills ADD COLUMN electricity_paid INTEGER DEFAULT 0'); } catch(e) {};
 
   // Seed default property types
   const defaults = [
@@ -210,10 +216,31 @@ async function startServer() {
     res.json(groups);
   });
 
-  app.post('/api/properties', (req, res) => {
-    const { name, property_type_id, address, monthly_rent } = req.body;
+  app.post('/api/property-groups', (req, res) => {
+    const { name, description } = req.body;
     try {
-      const result = db.prepare('INSERT INTO properties (name, property_type_id, address, monthly_rent) VALUES (?, ?, ?, ?)').run(name, parseInt(property_type_id), address || '', monthly_rent || 0);
+      const result = db.prepare('INSERT INTO property_groups (name, description) VALUES (?, ?)').run(name, description || '');
+      res.json({ id: result.lastInsertRowid, name, description });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/property-groups/:id', (req, res) => {
+    try {
+      // Unassign properties from this group
+      db.prepare('UPDATE properties SET group_id = NULL WHERE group_id = ?').run(parseInt(req.params.id));
+      db.prepare('DELETE FROM property_groups WHERE id = ?').run(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/properties', (req, res) => {
+    const { name, property_type_id, address, monthly_rent, group_id } = req.body;
+    try {
+      const result = db.prepare('INSERT INTO properties (name, property_type_id, group_id, address, monthly_rent) VALUES (?, ?, ?, ?, ?)').run(name, parseInt(property_type_id), group_id ? parseInt(group_id) : null, address || '', monthly_rent || 0);
       res.json({ id: result.lastInsertRowid, ...req.body });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -221,9 +248,13 @@ async function startServer() {
   });
 
   app.put('/api/properties/:id', (req, res) => {
-    const { name, property_type_id, address, monthly_rent } = req.body;
+    const { name, property_type_id, address, monthly_rent, group_id } = req.body;
     try {
-      db.prepare('UPDATE properties SET name = ?, property_type_id = ?, address = ?, monthly_rent = ? WHERE id = ?').run(name, parseInt(property_type_id), address || '', monthly_rent || 0, parseInt(req.params.id));
+      if (group_id !== undefined) {
+        db.prepare('UPDATE properties SET name = ?, property_type_id = ?, address = ?, monthly_rent = ?, group_id = ? WHERE id = ?').run(name, parseInt(property_type_id), address || '', monthly_rent || 0, parseInt(group_id), parseInt(req.params.id));
+      } else {
+        db.prepare('UPDATE properties SET name = ?, property_type_id = ?, address = ?, monthly_rent = ? WHERE id = ?').run(name, parseInt(property_type_id), address || '', monthly_rent || 0, parseInt(req.params.id));
+      }
       res.json({ id: req.params.id, ...req.body });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -320,39 +351,41 @@ async function startServer() {
     res.json(readings);
   });
 
-  app.get('/api/meter-readings/last/:tenantId', (req, res) => {
-    const reading = db.prepare(`
-      SELECT * FROM meter_readings WHERE tenant_id = ? ORDER BY year DESC, id DESC LIMIT 1
-    `).get(parseInt(req.params.tenantId));
-    res.json(reading || { current_reading: 0 });
-  });
-
-  // Save only the previous reading (initial/starting reading)
+  // Save only the previous reading (stored separately, not in meter_readings)
   app.post('/api/meter-readings/save-previous', (req, res) => {
     const { tenant_id, property_id, previous_reading } = req.body;
     try {
-      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-      const now = new Date();
-      const month = months[now.getMonth()];
-      const year = now.getFullYear();
-
-      // Check if a reading already exists for this tenant/month
-      const existing = db.prepare('SELECT id FROM meter_readings WHERE tenant_id = ? AND month = ? AND year = ?').get(parseInt(tenant_id), month, year);
+      // Store in a simple key-value style: update or insert into a last_readings table
+      db.exec(`CREATE TABLE IF NOT EXISTS last_readings (
+        tenant_id INTEGER PRIMARY KEY,
+        previous_reading REAL NOT NULL
+      )`);
+      const existing = db.prepare('SELECT tenant_id FROM last_readings WHERE tenant_id = ?').get(parseInt(tenant_id));
       if (existing) {
-        // Update existing
-        db.prepare('UPDATE meter_readings SET previous_reading = ?, current_reading = ?, units_consumed = 0 WHERE id = ?')
-          .run(previous_reading, previous_reading, existing.id);
+        db.prepare('UPDATE last_readings SET previous_reading = ? WHERE tenant_id = ?').run(previous_reading, parseInt(tenant_id));
       } else {
-        // Create new with current = previous (0 units consumed)
-        db.prepare(`
-          INSERT INTO meter_readings (tenant_id, property_id, reading_date, month, year, previous_reading, current_reading, units_consumed)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-        `).run(parseInt(tenant_id), parseInt(property_id), now.toISOString().split('T')[0], month, year, previous_reading, previous_reading);
+        db.prepare('INSERT INTO last_readings (tenant_id, previous_reading) VALUES (?, ?)').run(parseInt(tenant_id), previous_reading);
       }
       res.json({ success: true, previous_reading });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // Get saved previous reading for a tenant
+  app.get('/api/meter-readings/last/:tenantId', (req, res) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS last_readings (tenant_id INTEGER PRIMARY KEY, previous_reading REAL NOT NULL)`);
+    // First check last_readings table
+    const saved = db.prepare('SELECT previous_reading FROM last_readings WHERE tenant_id = ?').get(parseInt(req.params.tenantId));
+    if (saved) {
+      res.json({ current_reading: saved.previous_reading });
+      return;
+    }
+    // Fallback: check actual meter_readings for last current_reading
+    const reading = db.prepare(`
+      SELECT current_reading FROM meter_readings WHERE tenant_id = ? AND units_consumed > 0 ORDER BY year DESC, id DESC LIMIT 1
+    `).get(parseInt(req.params.tenantId));
+    res.json(reading || { current_reading: 0 });
   });
 
   app.post('/api/meter-readings', (req, res) => {
@@ -393,6 +426,14 @@ async function startServer() {
           INSERT INTO bills (tenant_id, property_id, meter_reading_id, month, year, rent_amount, electricity_units, rate_per_unit, electricity_amount, total_amount)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(parseInt(tenant_id), parseInt(property_id), readingId, month, parseInt(year), property.monthly_rent, unitsConsumed, property.rate_per_unit, electricityAmount, totalAmount);
+      }
+
+      // Update last_readings with current reading (for next month's previous)
+      const existingLast = db.prepare('SELECT tenant_id FROM last_readings WHERE tenant_id = ?').get(parseInt(tenant_id));
+      if (existingLast) {
+        db.prepare('UPDATE last_readings SET previous_reading = ? WHERE tenant_id = ?').run(current_reading, parseInt(tenant_id));
+      } else {
+        db.prepare('INSERT INTO last_readings (tenant_id, previous_reading) VALUES (?, ?)').run(parseInt(tenant_id), current_reading);
       }
 
       res.json({
@@ -466,7 +507,8 @@ async function startServer() {
       SELECT b.*, t.name as tenant_name, t.phone as tenant_phone,
              p.name as property_name, pt.name as property_type,
              COALESCE(mr.previous_reading, mr2.previous_reading) as prev_reading,
-             COALESCE(mr.current_reading, mr2.current_reading) as curr_reading
+             COALESCE(mr.current_reading, mr2.current_reading) as curr_reading,
+             COALESCE(mr.reading_date, mr2.reading_date) as reading_date
       FROM bills b
       JOIN tenants t ON b.tenant_id = t.id
       JOIN properties p ON b.property_id = p.id
@@ -496,7 +538,7 @@ async function startServer() {
   app.put('/api/bills/:id/pay', (req, res) => {
     const { paid_date } = req.body;
     try {
-      db.prepare('UPDATE bills SET is_paid = 1, paid_date = ? WHERE id = ?').run(paid_date || new Date().toISOString().split('T')[0], parseInt(req.params.id));
+      db.prepare('UPDATE bills SET is_paid = 1, rent_paid = 1, electricity_paid = 1, paid_date = ? WHERE id = ?').run(paid_date || new Date().toISOString().split('T')[0], parseInt(req.params.id));
       res.json({ success: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -505,7 +547,37 @@ async function startServer() {
 
   app.put('/api/bills/:id/unpay', (req, res) => {
     try {
-      db.prepare('UPDATE bills SET is_paid = 0, paid_date = NULL WHERE id = ?').run(parseInt(req.params.id));
+      db.prepare('UPDATE bills SET is_paid = 0, rent_paid = 0, electricity_paid = 0, paid_date = NULL WHERE id = ?').run(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Mark only rent as paid
+  app.put('/api/bills/:id/pay-rent', (req, res) => {
+    try {
+      db.prepare('UPDATE bills SET rent_paid = 1 WHERE id = ?').run(parseInt(req.params.id));
+      // If both are paid, mark whole bill as paid
+      const bill = db.prepare('SELECT rent_paid, electricity_paid FROM bills WHERE id = ?').get(parseInt(req.params.id));
+      if (bill.rent_paid && bill.electricity_paid) {
+        db.prepare('UPDATE bills SET is_paid = 1, paid_date = ? WHERE id = ?').run(new Date().toISOString().split('T')[0], parseInt(req.params.id));
+      }
+      res.json({ success: true });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Mark only electricity as paid
+  app.put('/api/bills/:id/pay-electricity', (req, res) => {
+    try {
+      db.prepare('UPDATE bills SET electricity_paid = 1 WHERE id = ?').run(parseInt(req.params.id));
+      // If both are paid, mark whole bill as paid
+      const bill = db.prepare('SELECT rent_paid, electricity_paid FROM bills WHERE id = ?').get(parseInt(req.params.id));
+      if (bill.rent_paid && bill.electricity_paid) {
+        db.prepare('UPDATE bills SET is_paid = 1, paid_date = ? WHERE id = ?').run(new Date().toISOString().split('T')[0], parseInt(req.params.id));
+      }
       res.json({ success: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -585,6 +657,19 @@ async function startServer() {
     if (created > 0) console.log(`  Auto-generated ${created} rent bills for ${m} ${y}`);
   }
 
+  // Migrate: move "save previous only" entries from meter_readings to last_readings
+  db.exec(`CREATE TABLE IF NOT EXISTS last_readings (tenant_id INTEGER PRIMARY KEY, previous_reading REAL NOT NULL)`);
+  const dummyReadings = db.prepare('SELECT tenant_id, previous_reading FROM meter_readings WHERE units_consumed = 0').all();
+  for (const r of dummyReadings) {
+    const existing = db.prepare('SELECT tenant_id FROM last_readings WHERE tenant_id = ?').get(r.tenant_id);
+    if (!existing) {
+      db.prepare('INSERT INTO last_readings (tenant_id, previous_reading) VALUES (?, ?)').run(r.tenant_id, r.previous_reading);
+    }
+  }
+  // Remove dummy readings (units_consumed = 0) from meter_readings
+  db.prepare('DELETE FROM meter_readings WHERE units_consumed = 0').run();
+  if (dummyReadings.length > 0) console.log(`  Migrated ${dummyReadings.length} previous readings to last_readings table`);
+
   // Run auto-generation on startup
   autoGenerateMonthlyBills();
 
@@ -651,8 +736,9 @@ async function startServer() {
              t.id as tenant_id, t.name as tenant_name, t.phone as tenant_phone,
              b.id as bill_id, b.total_amount as current_bill,
              b.electricity_units, b.electricity_amount, b.rent_amount,
-             b.is_paid as bill_paid,
-             mr.previous_reading as prev_reading, mr.current_reading as curr_reading
+             b.is_paid as bill_paid, b.rent_paid, b.electricity_paid,
+             mr.previous_reading as prev_reading, mr.current_reading as curr_reading,
+             mr.reading_date as reading_date
       FROM properties p
       JOIN property_types pt ON p.property_type_id = pt.id
       LEFT JOIN property_groups pg ON p.group_id = pg.id
@@ -662,11 +748,14 @@ async function startServer() {
       ORDER BY pg.name, pt.name, p.name
     `).all(m, y);
 
-    // For properties without a bill this month, get last reading for the tenant
+    // For properties without electricity reading, get previous reading from last_readings
+    db.exec(`CREATE TABLE IF NOT EXISTS last_readings (tenant_id INTEGER PRIMARY KEY, previous_reading REAL NOT NULL)`);
     for (const card of propertyCards) {
-      if (card.tenant_id && !card.current_bill) {
-        const lastReading = db.prepare('SELECT current_reading FROM meter_readings WHERE tenant_id = ? ORDER BY year DESC, id DESC LIMIT 1').get(card.tenant_id);
-        card.prev_reading = lastReading ? lastReading.current_reading : 0;
+      if (card.tenant_id && (!card.prev_reading || card.prev_reading === 0)) {
+        const saved = db.prepare('SELECT previous_reading FROM last_readings WHERE tenant_id = ?').get(card.tenant_id);
+        if (saved) {
+          card.prev_reading = saved.previous_reading;
+        }
       }
     }
 

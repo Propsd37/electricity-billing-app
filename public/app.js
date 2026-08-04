@@ -131,6 +131,8 @@ async function renderDashboard() {
     const paidCount = cards.filter(c => c.bill_paid === 1).length;
     const tenantCount = cards.filter(c => !!c.tenant_name).length;
     const totalAmt = cards.reduce((s, c) => s + (c.current_bill || c.monthly_rent || 0), 0);
+    const totalRent = cards.reduce((s, c) => s + (c.rent_amount || c.monthly_rent || 0), 0);
+    const totalElec = cards.reduce((s, c) => s + (c.electricity_amount || 0), 0);
     const pendingAmt = cards.filter(c => c.tenant_name && c.bill_paid !== 1).reduce((s, c) => s + (c.current_bill || c.monthly_rent || 0), 0);
 
     html += `
@@ -143,6 +145,7 @@ async function renderDashboard() {
           </div>
           <div class="gh-right">
             <span class="gh-stat gh-success">${paidCount} paid</span>
+            <span class="gh-stat gh-elec">⚡₹${totalElec.toFixed(0)}</span>
             <span class="gh-stat gh-pending">₹${pendingAmt.toFixed(0)} pending</span>
             <span class="gh-stat">₹${totalAmt.toFixed(0)} total</span>
           </div>
@@ -277,6 +280,7 @@ function openCardDetail(p) {
       <div class="detail-section">
         <div class="detail-title">⚡ Electricity (₹${p.rate_per_unit}/unit)</div>
         ${elecDone ? `
+          ${p.reading_date ? `<div style="font-size:0.75rem;color:var(--text-light);margin-bottom:6px;">📅 Reading taken: ${p.reading_date}</div>` : ''}
           <div class="detail-grid">
             <div><span>Previous</span><strong>${p.prev_reading || 0}</strong></div>
             <div><span>Current</span><strong>${p.curr_reading || 0}</strong></div>
@@ -310,19 +314,25 @@ function openCardDetail(p) {
       <!-- Total -->
       <div class="detail-section detail-total">
         <div class="detail-grid">
-          <div><span>Rent</span><strong>${formatCurrency(p.rent_amount || p.monthly_rent)}</strong></div>
-          <div><span>Electricity</span><strong>${formatCurrency(p.electricity_amount || 0)}</strong></div>
+          <div><span>Rent ${p.rent_paid ? '✅' : ''}</span><strong>${formatCurrency(p.rent_amount || p.monthly_rent)}</strong></div>
+          <div><span>Electricity ${p.electricity_paid ? '✅' : ''}</span><strong>${formatCurrency(p.electricity_amount || 0)}</strong></div>
         </div>
         <div class="detail-grand-total">
           <span>Total Bill</span>
           <strong>${formatCurrency(p.current_bill || p.monthly_rent || 0)}</strong>
         </div>
         <div class="detail-actions" style="margin-top:10px;">
-          ${p.bill_id ? (p.bill_paid === 1 
-            ? `<button class="btn btn-outline" onclick="hideModal(); markUnpaidDash(${p.bill_id})">↩ Mark Unpaid</button>`
-            : `<button class="btn btn-success" onclick="hideModal(); markPaid(${p.bill_id})">✓ Mark as Paid</button>`
-          ) : ''}
-          <button class="btn btn-outline" onclick="hideModal(); viewHistory(${p.tenant_id}, '${p.tenant_name.replace(/'/g, "\\'")}')">📋 View History</button>
+          ${p.bill_id ? `
+            ${p.bill_paid === 1 
+              ? `<button class="btn btn-outline" onclick="hideModal(); markUnpaidDash(${p.bill_id})">↩ Mark All Unpaid</button>`
+              : `
+                ${!p.rent_paid ? `<button class="btn btn-success" onclick="hideModal(); markRentPaid(${p.bill_id})">🏠 Rent Paid</button>` : `<button class="btn btn-outline" disabled>🏠 Rent ✓</button>`}
+                ${!p.electricity_paid ? `<button class="btn btn-success" onclick="hideModal(); markElecPaid(${p.bill_id})">⚡ Elec Paid</button>` : `<button class="btn btn-outline" disabled>⚡ Elec ✓</button>`}
+                <button class="btn btn-primary" onclick="hideModal(); markPaid(${p.bill_id})">✓ All Paid</button>
+              `
+            }
+          ` : ''}
+          <button class="btn btn-outline" onclick="hideModal(); viewHistory(${p.tenant_id}, '${p.tenant_name.replace(/'/g, "\\'")}')">📋 History</button>
         </div>
       </div>
     `;
@@ -564,6 +574,18 @@ async function markPaid(billId) {
   renderDashboard();
 }
 
+async function markRentPaid(billId) {
+  await API.put(`/bills/${billId}/pay-rent`, {});
+  showToast('Rent marked as paid!', 'success');
+  renderDashboard();
+}
+
+async function markElecPaid(billId) {
+  await API.put(`/bills/${billId}/pay-electricity`, {});
+  showToast('Electricity marked as paid!', 'success');
+  renderDashboard();
+}
+
 async function markUnpaidDash(billId) {
   await API.put(`/bills/${billId}/unpay`, {});
   showToast('Marked as unpaid', '');
@@ -589,12 +611,13 @@ async function viewHistory(tenantId, tenantName) {
 
   let tableRows = '';
   if (bills.length === 0) {
-    tableRows = `<tr><td colspan="9" style="text-align:center;color:var(--text-light);">No bills yet</td></tr>`;
+    tableRows = `<tr><td colspan="10" style="text-align:center;color:var(--text-light);">No bills yet</td></tr>`;
   } else {
     bills.forEach(b => {
       tableRows += `
         <tr>
           <td>${b.month} ${b.year}</td>
+          <td>${b.reading_date || '—'}</td>
           <td>${b.prev_reading || '—'}</td>
           <td>${b.curr_reading || '—'}</td>
           <td>${b.electricity_units || 0}</td>
@@ -628,12 +651,12 @@ async function viewHistory(tenantId, tenantName) {
     <div class="table-container" style="max-height:400px;overflow-y:auto;">
       <table>
         <thead><tr>
-          <th>Month</th><th>Prev</th><th>Curr</th><th>Units</th><th>Rent</th><th>Elec.</th><th>Total</th><th>Status</th><th>Paid On</th>
+          <th>Month</th><th>Date</th><th>Prev</th><th>Curr</th><th>Units</th><th>Rent</th><th>Elec.</th><th>Total</th><th>Status</th><th>Paid On</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
         <tfoot>
           <tr style="font-weight:600;background:var(--bg);">
-            <td>TOTAL</td><td></td><td></td><td></td>
+            <td>TOTAL</td><td></td><td></td><td></td><td></td>
             <td class="amount">${formatCurrency(totalRent)}</td>
             <td class="amount">${formatCurrency(totalElec)}</td>
             <td class="amount">${formatCurrency(totalAmount)}</td>
@@ -1050,6 +1073,7 @@ async function deactivateTenant(id) {
 async function renderProperties() {
   const properties = await API.get('/properties');
   const types = await API.get('/property-types');
+  const groups = await API.get('/property-groups');
 
   let html = `
     <div class="card">
@@ -1093,10 +1117,12 @@ async function renderProperties() {
   html += `</tbody></table></div></div>`;
   document.getElementById('pageContent').innerHTML = html;
   window._propertyTypes = types;
+  window._propertyGroups = groups;
 }
 
 function showAddPropertyModal() {
   const types = window._propertyTypes || [];
+  const groups = window._propertyGroups || [];
   showModal(`
     <div class="modal-header">
       <h2>Add New Property</h2>
@@ -1110,6 +1136,13 @@ function showAddPropertyModal() {
       <label>Property Type *</label>
       <select id="propType">
         ${types.map(t => `<option value="${t.id}">${t.name} (₹${t.rate_per_unit}/unit)</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Group</label>
+      <select id="propGroup">
+        <option value="">-- No Group --</option>
+        ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
@@ -1127,6 +1160,7 @@ function showAddPropertyModal() {
 async function saveProperty() {
   const name = document.getElementById('propName').value.trim();
   const property_type_id = document.getElementById('propType').value;
+  const group_id = document.getElementById('propGroup').value;
   const monthly_rent = parseFloat(document.getElementById('propRent').value) || 0;
   const address = document.getElementById('propAddress').value.trim();
 
@@ -1135,7 +1169,7 @@ async function saveProperty() {
     return;
   }
 
-  const result = await API.post('/properties', { name, property_type_id: parseInt(property_type_id), monthly_rent, address });
+  const result = await API.post('/properties', { name, property_type_id: parseInt(property_type_id), group_id: group_id ? parseInt(group_id) : null, monthly_rent, address });
   if (result.error) {
     showToast(result.error, 'error');
   } else {
@@ -1151,6 +1185,7 @@ async function editProperty(id) {
   if (!prop) return;
 
   const types = window._propertyTypes || [];
+  const groups = window._propertyGroups || [];
   showModal(`
     <div class="modal-header">
       <h2>Edit Property</h2>
@@ -1164,6 +1199,13 @@ async function editProperty(id) {
       <label>Property Type *</label>
       <select id="propType">
         ${types.map(t => `<option value="${t.id}" ${t.id === prop.property_type_id ? 'selected' : ''}>${t.name} (₹${t.rate_per_unit}/unit)</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Group</label>
+      <select id="propGroup">
+        <option value="">-- No Group --</option>
+        ${groups.map(g => `<option value="${g.id}" ${g.id === prop.group_id ? 'selected' : ''}>${g.name}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
@@ -1181,6 +1223,7 @@ async function editProperty(id) {
 async function updateProperty(id) {
   const name = document.getElementById('propName').value.trim();
   const property_type_id = document.getElementById('propType').value;
+  const group_id = document.getElementById('propGroup').value;
   const monthly_rent = parseFloat(document.getElementById('propRent').value) || 0;
   const address = document.getElementById('propAddress').value.trim();
 
@@ -1189,7 +1232,7 @@ async function updateProperty(id) {
     return;
   }
 
-  await API.put(`/properties/${id}`, { name, property_type_id: parseInt(property_type_id), monthly_rent, address });
+  await API.put(`/properties/${id}`, { name, property_type_id: parseInt(property_type_id), group_id: group_id ? parseInt(group_id) : null, monthly_rent, address });
   showToast('Property updated!', 'success');
   hideModal();
   renderProperties();
@@ -1237,6 +1280,14 @@ async function renderSettings() {
       </div>
     </div>
 
+    <div class="card" style="margin-top: 20px;">
+      <div class="card-header">
+        <h3>Property Groups</h3>
+        <button class="btn btn-primary" onclick="showAddGroupModal()">+ Add Group</button>
+      </div>
+      <div class="table-container" id="groupsTable"></div>
+    </div>
+
     <div class="card" style="border: 2px solid var(--danger); margin-top: 20px;">
       <div class="card-header">
         <h3 style="color:var(--danger);">⚠️ Danger Zone</h3>
@@ -1252,6 +1303,60 @@ async function renderSettings() {
   `;
 
   document.getElementById('pageContent').innerHTML = html;
+
+  // Load groups into table
+  const groups = await API.get('/property-groups');
+  document.getElementById('groupsTable').innerHTML = `
+    <table>
+      <thead><tr><th>Group Name</th><th>Properties</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${groups.map(g => `
+          <tr>
+            <td><strong>${g.name}</strong></td>
+            <td>${g.property_count} units</td>
+            <td><button class="btn btn-sm btn-danger" onclick="deleteGroup(${g.id})">Delete</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function showAddGroupModal() {
+  showModal(`
+    <div class="modal-header">
+      <h2>Add New Group</h2>
+      <button class="modal-close" onclick="hideModal()">×</button>
+    </div>
+    <div class="form-group">
+      <label>Group Name *</label>
+      <input type="text" id="groupName" placeholder="e.g. New Building Block A">
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <input type="text" id="groupDesc" placeholder="Optional description">
+    </div>
+    <button class="btn btn-primary" onclick="saveGroup()">Save Group</button>
+  `);
+}
+
+async function saveGroup() {
+  const name = document.getElementById('groupName').value.trim();
+  const description = document.getElementById('groupDesc').value.trim();
+  if (!name) { showToast('Group name is required', 'error'); return; }
+  const result = await API.post('/property-groups', { name, description });
+  if (result.error) { showToast(result.error, 'error'); return; }
+  showToast('Group created!', 'success');
+  hideModal();
+  renderSettings();
+}
+
+async function deleteGroup(id) {
+  if (confirm('Delete this group? Properties in this group will become unassigned.')) {
+    await API.delete(`/property-groups/${id}`);
+    showToast('Group deleted', '');
+    renderSettings();
+  }
 }
 
 function showAddTypeModal() {

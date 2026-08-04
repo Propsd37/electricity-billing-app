@@ -1,15 +1,19 @@
-const CACHE_NAME = 'billing-v1';
-const URLS_TO_CACHE = ['/', '/style.css', '/app.js'];
+const CACHE_NAME = 'billing-v2';
 
 self.addEventListener('install', event => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  // Clear old caches
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(URLS_TO_CACHE))
+    caches.keys().then(keys => Promise.all(
+      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+    ))
   );
 });
 
 self.addEventListener('fetch', event => {
-  // Network first, fallback to cache
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
-  );
+  // Always fetch from network (no caching for API or HTML)
+  event.respondWith(fetch(event.request));
 });

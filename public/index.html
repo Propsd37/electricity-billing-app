@@ -42,10 +42,16 @@
     <div class="modal-content" id="modalContent"></div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
   <script>
+    // Unregister any existing service workers and clear caches (fixes stale data across devices)
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => reg.unregister());
+      });
+    }
+    if ('caches' in window) {
+      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
     }
   </script>
 </body>

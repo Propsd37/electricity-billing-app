@@ -1,14 +1,23 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { DbWrapper } = require('./db');
+const { DbWrapper, saveDb } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Prevent caching of all responses so every device always gets fresh data
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
+app.use(express.static(path.join(__dirname, '..', 'public'), { etag: false, lastModified: false, maxAge: 0 }));
 
 async function startServer() {
   // Initialize database
@@ -785,6 +794,13 @@ async function startServer() {
     db.exec('DELETE FROM meter_readings');
     db.exec('DELETE FROM tenants');
     res.json({ success: true });
+  });
+
+  // Download the raw database file (for backup / migration)
+  app.get('/api/export-db', (req, res) => {
+    saveDb(); // force write in-memory DB to disk
+    const dbFilePath = path.join(__dirname, '..', 'data', 'billing.db');
+    res.download(dbFilePath, 'billing.db');
   });
 
   // Serve frontend

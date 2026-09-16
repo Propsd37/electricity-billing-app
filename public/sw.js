@@ -1,19 +1,17 @@
-const CACHE_NAME = 'billing-v2';
-
-self.addEventListener('install', event => {
-  self.skipWaiting();
-});
+// Service worker disabled - unregister and clear all caches
+self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', event => {
-  // Clear old caches
   event.waitUntil(
-    caches.keys().then(keys => Promise.all(
-      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-    ))
+    caches.keys()
+      .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+      .then(() => self.registration.unregister())
+      .then(() => self.clients.matchAll())
+      .then(clients => clients.forEach(c => c.navigate(c.url)))
   );
 });
 
+// Always go to network, never cache
 self.addEventListener('fetch', event => {
-  // Always fetch from network (no caching for API or HTML)
   event.respondWith(fetch(event.request));
 });
